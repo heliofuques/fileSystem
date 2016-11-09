@@ -3,38 +3,117 @@
 #include <stdlib.h>
 
 
-/*##########
-	Diretorio Raiz
-	Ate 2TB de espaco: 
-  ##########*/
+// DEFINES e STRUCTS
+
+#define BLOCK_SIZE 512
+#define ROOT_ENTRIES 127
+
+#define ROOT 1
+#define PATH 0
+
+#define ARQ 0
+#define DIR 1
 
 struct directory_entry{
-	unsigned char dir; // 1 byte
-	char name[20]; // 20 byte
-	unsigned int size_bytes; // 4 byte
-	unsigned int start; // 4 byte
+	unsigned int dir; 
+	char name[20]; 
+	unsigned int size_bytes;
+	unsigned int start;
 };
-// Total = 32
-
 struct root_table_directory{
 	unsigned int free_blocks_list;
-	struct directory_entry list_entry[127]; //32 * 141
+	struct directory_entry list_entry[127]; 
 	unsigned int not_used[7];
 
-}root;
-
+};
 struct table_directory{
 	struct directory_entry list_entry[16];
 };
-
-/* ####
-	Setor de arquivo.
-	Tam 512 bytes
-   #### */	
 struct sector_data{
 	unsigned char data[508];
 	unsigned int next_sector;	
 };
+
+
+// GLOBALS
+struct root_table_directory 		   root;
+
+FILE 							*fileSystem;
+FILE 								*toSave;
+
+
+int openRoot( void )
+{
+	fileSystem = fopen ( "memory", "r" );
+	if (fileSystem == NULL)
+	{
+		perror("ERROR:");
+		return -1;
+	}
+	if (fread(&root, sizeof(root), 1, fileSystem ) < 0 )
+	{
+		perror("ERROR:");
+		return -1;
+	}
+	fclose(fileSystem);
+	return 0;
+} 
+struct directory_entry *getDirectoryEntry( char name[20] )
+{
+	int i;
+	// TODO para quando não estiver no diretorio root
+	if ( openRoot( ) < 0 )
+		return NULL;
+	for ( i = 0; i < ROOT_ENTRIES; i++)
+	{
+		if( strcmp(root.list_entry[i].name, name) == 0 )
+		{
+			return &root.list_entry[i];
+		}
+	}
+	return NULL;
+}
+int createDirectoryEntry( int root_or_not, int file_dir , int size, char name[20])
+{
+	int i,rt;
+	fileSystem = fopen ( "memory", "r" );
+	fread(&root, sizeof(root), 1, fileSystem );
+	fseek(fileSystem, 0L, SEEK_SET);
+	if ( root_or_not == 1 )
+	{
+		for ( i = 0; i < ROOT_ENTRIES; i++)
+		{
+			if (root.list_entry[i].start == 0)
+			{	
+				printf("entrei\n");
+				struct sector_data setor;
+
+				/* Lẽ o setor livre e atualiza para o próximo da lista */
+				fread( &setor, BLOCK_SIZE * root.free_blocks_list, 1, fileSystem );
+
+
+				printf("%d\n", root.free_blocks_list );
+				/* Atualiza e retorna o bloco livre adquirido */
+				root.list_entry[i].start = root.free_blocks_list;
+				root.list_entry[i].size_bytes = size;
+				strncpy( root.list_entry[i].name, name, 20);
+				root.list_entry[i].dir = file_dir;
+				/* TODO para quando precisar de mais de um bloco */
+				fclose(fileSystem);
+				rt = root.list_entry[i].start;
+				root.free_blocks_list = setor.next_sector;
+				printf("saindo %d\n", rt);
+				return rt;
+			}
+		}
+	}
+	else
+	{
+		printf("TODO\n");
+	}
+   
+}
+
 
 int main( int argc, char *argv[])
 {
@@ -47,32 +126,84 @@ int main( int argc, char *argv[])
 	{
 		if ( strcmp( argv[1], "-init") == 0 )
 		{
-			printf("sizeof:%d\n", sizeof(struct table_directory) );
-			FILE *fp;
-			fp = fopen ( "memory", "w" );
+			fileSystem = fopen ( "memory", "w" );
 			int i = 0;
-			int tamMax = atoi( argv[2] ) * 2 * 1000 - 8; // Cada bloco ocupa 512, então para gerar 1 kb, deve ser gerado
-			
-			printf("%d\n", tamMax);
+			int tamMax = (atoi( argv[2] ) * 2) - 8; // Cada bloco ocupa 512, então para gerar 1 kb, deve ser gerado
+			printf("%d\n",tamMax );
 			struct sector_data setores[tamMax];
+
+			memset( setores, 0, sizeof(setores));
 			while ( i+1 < tamMax )
-			{
-				setores[i].next_sector = &setores[i+1];
+			{	
+				setores[i].next_sector = i+9;
 				i++;
 			}
 			setores[i+1].next_sector = 0;
-
-			fwrite( &root, sizeof( root ), 1, fp);
-			fwrite( setores, 512, tamMax, fp );
-			fclose( fp );
+			root.free_blocks_list = 9;
+			fwrite( &root, sizeof( root ), 1, fileSystem);
+			fwrite( setores, 512, tamMax, fileSystem );
+			fclose( fileSystem );
 		}
 		else if( strcmp( argv[1], "-create") == 0)
 		{
-			printf("TODO2\n");
+			char *buffer;
+			int size,rt, i, bloco_livre;
+
+			// VERIFICAR NÚMEROS DE ARGUMENTOS 
+
+			toSave = fopen(argv[2], "r");
+			fseek(toSave, 0L, SEEK_END);
+			size = ftell(toSave);
+			fseek(toSave, 0L, SEEK_SET);
+			// CHAMAR FUNÇÂO Q ACHA o BLOCO LIVRE PARA AQUELE DIRETÒRIO
+			bloco_livre = createDirectoryEntry( ROOT, ARQ ,size , argv[3]);
+
+
+			buffer = (char*) malloc( size );
+			rt = fread( buffer, size,  1, toSave);
+
+			fileSystem = fopen ( "memory", "r+'" );
+			if ( fseek( fileSystem, bloco_livre * 512, SEEK_SET ) < 0)
+			{
+				perror("ERROR:");
+				return -1;
+			}
+
+			// TODO, para quando for mais de um bloco
+			if ( fwrite( buffer, size, 1, fileSystem) < 0 )
+			{
+				perror("ERROR:");
+				return -1;
+			}
+			free( buffer );
+			fclose(toSave);
+			fclose(fileSystem);
 		}
 		else if( strcmp( argv[1], "-read" ) == 0)
 		{
-			printf("TODO\n");
+			struct directory_entry dir;
+			char buffer[512];
+			int size,rt;
+
+			if ( openRoot() < 0 )
+				return -1;
+			dir = *getDirectoryEntry( argv[3] ); // possível bug
+			toSave = fopen(argv[2], "w");
+
+			
+
+			fileSystem = fopen ( "memory", "r" );
+			fseek ( fileSystem, dir.start * 512, SEEK_SET );
+			fread( buffer, dir.size_bytes, 1, fileSystem);
+			
+			printf("buffer:%s\n", buffer );
+
+			write(buffer, dir.size_bytes, 1, toSave);
+ 
+
+			fclose( fileSystem );
+			fclose( toSave );
+
 		}
 		else if( strcmp( argv[1], "-del" ) == 0)
 		{
