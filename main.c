@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <time.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -118,8 +120,7 @@ struct directory_entry *getDirectoryEntry( char path[128] )
 						entryContext = root.list_entry[i];
 						fseek( fileSystem, BLOCK_SIZE * entryContext.start, SEEK_SET );
 						fread( &tableContext, BLOCK_SIZE, 1, fileSystem );
-						root_or_not = 1;
-						dir_count++;
+						root_or_not = 1;	
 						break;
 					}
 				}
@@ -133,7 +134,6 @@ struct directory_entry *getDirectoryEntry( char path[128] )
 						entryContext = tableContext.list_entry[i];
 						fseek( fileSystem, BLOCK_SIZE * entryContext.start, SEEK_SET );
 						fread( &tableContext, BLOCK_SIZE, 1, fileSystem );
-						dir_count++;
 						break;
 					}
 				}
@@ -201,6 +201,7 @@ int createDirectoryEntry( char name[20], int dir_n )
 	entryContext.size_bytes = 512;
 	entryContext.start = root.free_blocks_list;
 	entryContext.dir = DIR;
+
 	strncpy(entryContext.name, name, 20);
 	// FIM DA ESCRITA ///
 
@@ -290,6 +291,7 @@ int mkdirCommand( char path[128] )
 			{
 				if( tableContext.list_entry[dir_count2].size_bytes == 0 )
 				{
+					printf("criando\n");
 					createDirectoryEntry( name, dir_count2 );
 					break;
 				}
@@ -457,7 +459,6 @@ int contextEnter( char **completePath )
 					fread( &tableContext, BLOCK_SIZE, 1, fileSystem );
 					root_or_not = 1;
 					dir_count++;
-					printf("carregando o %d\n", BLOCK_SIZE * entryContext.start );
 					break;
 				}
 			}
@@ -533,8 +534,74 @@ void listCommand( char path[128] )
 		}
 	}
 
-
 	fclose(fileSystem);
+}
+
+
+void delFileinRoot( int i )
+{
+	struct sector_data setor_livre;
+	int ultimo_livre = root.free_blocks_list;
+
+	// atualiza o últim dos blocos livres para esse liberado
+	fseek(fileSystem, BLOCK_SIZE*root.free_blocks_list, SEEK_SET);
+	fread( &setor_livre, BLOCK_SIZE, 1, fileSystem );	
+	while(setor_livre.next_sector > 0 )
+	{
+		ultimo_livre = setor_livre.next_sector;
+		fseek(fileSystem, BLOCK_SIZE* setor_livre.next_sector, SEEK_SET);
+		fread( &setor_livre, BLOCK_SIZE, 1, fileSystem );
+	}
+
+	setor_livre.next_sector = root.list_entry[i].start;
+
+
+
+	fseek(fileSystem, BLOCK_SIZE*ultimo_livre, SEEK_SET);
+	fwrite( &setor_livre, BLOCK_SIZE, 1, fileSystem );
+	/* Lẽ o setor livre e atualiza para o próximo da lista */
+
+	root.list_entry[i].start = 0;
+	// Mudar o próximo bloco livre
+	// Alterar entry 
+	root.list_entry[i].size_bytes = 0;
+
+	// salva saporra
+	fseek( fileSystem, 0L, SEEK_SET );
+	fwrite( &root, sizeof(root), 1, fileSystem);
+
+}
+
+void delFileinPath ( int i )
+{
+	struct sector_data setor_livre;
+	int ultimo_livre = root.free_blocks_list;
+
+
+	// atualiza o últim dos blocos livres para esse liberado
+	fseek(fileSystem, BLOCK_SIZE*root.free_blocks_list, SEEK_SET);
+	fread( &setor_livre, BLOCK_SIZE, 1, fileSystem );	
+	while(setor_livre.next_sector > 0 )
+	{
+		ultimo_livre = setor_livre.next_sector;
+		fseek(fileSystem, BLOCK_SIZE* setor_livre.next_sector, SEEK_SET);
+		fread( &setor_livre, BLOCK_SIZE, 1, fileSystem );
+	}
+
+	setor_livre.next_sector = tableContext.list_entry[i].start;
+
+	fseek(fileSystem, BLOCK_SIZE*ultimo_livre, SEEK_SET);
+	fwrite( &setor_livre, BLOCK_SIZE, 1, fileSystem );
+	/* Lẽ o setor livre e atualiza para o próximo da lista */
+
+	tableContext.list_entry[i].start = 0;
+	// Mudar o próximo bloco livre
+	// Alterar entry 
+	tableContext.list_entry[i].size_bytes = 0;
+
+	// salva saporra
+	fseek( fileSystem, BLOCK_SIZE*entryContext.start, SEEK_SET );
+	fwrite( &tableContext, sizeof(tableContext), 1, fileSystem);
 }
 
 int delFile( char path[128] )
@@ -559,85 +626,113 @@ int delFile( char path[128] )
 		{
 			if ( strcmp(root.list_entry[i].name, name) == 0 )
 			{
-				printf("prox free:%d\n", root.free_blocks_list );
-				struct sector_data setor;
-				fseek(fileSystem, BLOCK_SIZE*root.list_entry[i].start, SEEK_SET);
-				fread( &setor, BLOCK_SIZE, 1, fileSystem );
-
-				printf("primeiro do mundo:%d\n",root.list_entry[i].start  );
-
-				while ( setor.next_sector > 0 )
-				{
-					printf("entrei\n");
-					printf("next:%d\n", setor.next_sector );
-					fseek(fileSystem, BLOCK_SIZE* setor.next_sector, SEEK_SET);
-					fread( &setor, BLOCK_SIZE, 1, fileSystem );
-				}
-				printf("%d\n", setor.next_sector );
-				setor.next_sector = root.free_blocks_list;
-
-
-				root.free_blocks_list = root.list_entry[i].start;
-
-				printf("first sector%d\n", root.free_blocks_list );
-
-				fseek(fileSystem, BLOCK_SIZE*root.free_blocks_list, SEEK_SET);
-				fwrite( &setor, BLOCK_SIZE, 1, fileSystem );
-				/* Lẽ o setor livre e atualiza para o próximo da lista */
-
-				root.list_entry[i].start = 0;
-				// Mudar o próximo bloco livre
-				// Alterar entry 
-				root.list_entry[i].size_bytes = 0;
-
-				// salva saporra
-				fseek( fileSystem, 0l, SEEK_SET );
-				fwrite( &root, sizeof(root), 1, fileSystem);
-
+				delFileinRoot( i );
+				break;
 			}
 		}
-
-		int bloco = root.free_blocks_list;
-		int contador= 0;
-		while (bloco > 0)
-		{
-			printf("bloco:%d\n", bloco );
-			struct sector_data setor;
-			fseek(fileSystem, bloco * BLOCK_SIZE, SEEK_SET);
-			fread( &setor, BLOCK_SIZE, 1, fileSystem );
-
-			bloco = setor.next_sector;
-			contador++;
-		}
-		printf("total de blocos livres:%d\n", contador );
 	} 
 	else
 	{
-		printf("TODO\n");
+		strncpy(name, completePath[dir_count - 1], 20 );
+		completePath[dir_count-1] = NULL;
 		contextEnter( completePath );
 		for ( i = 0; i < 16; i++)
 		{
-			if ( tableContext.list_entry[i].size_bytes > 0 )
+			if ( strcmp(tableContext.list_entry[i].name, name) == 0 )
 			{
-				if ( tableContext.list_entry[i].dir == DIR )
-				{
-					printf("d ");
-					printf("%s\n", tableContext.list_entry[i].name);
-				}
-				else
-				{
-					printf("f ");
-					printf("%s\t%d\n", tableContext.list_entry[i].name, tableContext.list_entry[i].size_bytes);
-				}
+				delFileinPath( i );
+				break;
 			}
 		}
 	}
-
 
 	fclose(fileSystem);
 
 }
 
+int isItEmpty( int root_or_not, int entry )
+{
+	int i;
+	if ( root_or_not == ROOT )
+	{
+		struct directory_entry entrada;
+		struct table_directory table;
+		
+		entrada = root.list_entry[entry];
+		fseek( fileSystem, BLOCK_SIZE * entrada.start, SEEK_SET );
+		fread( &table, BLOCK_SIZE, 1, fileSystem );
+		for( i=0; i< 16; i++ )
+		{
+			if ( table.list_entry[i].start != 0 )
+			{
+				return -1;
+			}
+		}
+	}
+	else
+	{
+		struct directory_entry entrada;
+		struct table_directory table;
+		
+		entrada = tableContext.list_entry[entry];
+		fseek( fileSystem, BLOCK_SIZE * entrada.start, SEEK_SET );
+		fread( &table, BLOCK_SIZE, 1, fileSystem );
+		for( i=0; i< 16; i++ )
+		{
+			if ( table.list_entry[i].start != 0 )
+			{
+				return -1;
+			}
+		}
+		
+	}
+	return 0;
+}
+
+int delFolder( char path[128] )
+{
+	/* VERIFICAR O CAMINHO E TALS */
+	int i, dir_count = 0, root_or_not = 0;
+	char **completePath, name[20];
+
+	openRoot( );
+	fileSystem = fopen ( "memory", "r+" );
+
+	completePath = returnPathList( path );
+	while ( completePath[dir_count] != NULL )
+	{
+		dir_count++;
+	}
+	// Entrar no último context
+	strncpy( name, completePath[0],  NAME_SIZE );
+	if ( dir_count == 1 )
+	{
+		for ( i = 0; i < ROOT_ENTRIES; i++)
+		{
+			if ( strcmp(root.list_entry[i].name, name) == 0 && root.list_entry[i].dir == DIR && isItEmpty( ROOT, i ) == 0 )
+			{
+				delFileinRoot( i );
+				return 0;
+			}
+		}
+	} 
+	else
+	{
+		strncpy(name, completePath[dir_count - 1], 20 );
+		completePath[dir_count-1] = NULL;
+		contextEnter( completePath );
+		for ( i = 0; i < 16; i++)
+		{
+			if ( strcmp(tableContext.list_entry[i].name, name) == 0 && tableContext.list_entry[i].dir == DIR && isItEmpty( PATH, i ) == 0)
+			{
+				delFileinPath( i );
+				return 0;
+			}
+		}
+	}
+
+	printf("Impossível apagar pasta com arquivos dentro!\n");
+}
 
 int main( int argc, char *argv[])
 {
@@ -656,15 +751,13 @@ int main( int argc, char *argv[])
 
 			
 			// FINAL DA OPERACAO SOBRE O ULTIMO SETOR
-
-			printf("total de blocos:%d\n", tamMax );
 			root.free_blocks_list = 9;
 			fwrite( &root, sizeof( root ), 1, fileSystem);
 
 
+			struct sector_data setores;
 			while ( i+1 < tamMax )
 			{	
-				struct sector_data setores;
 				memset( &setores, 0, sizeof(setores));
 				setores.next_sector = i+9;
 				fwrite( &setores, 512, 1, fileSystem );
@@ -817,6 +910,11 @@ int main( int argc, char *argv[])
 		{
 			printf("Exibindo arquivos da pasta %s\n", argv[2]);
 			listCommand( argv[2] );
+		}
+		else if( strcmp( argv[1], "-rmdir") == 0 )
+		{
+			printf("Removendo a pasta %s\n", argv[2]);
+			delFolder( argv[2] );
 		}
 		else
 		{
